@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电磁学仿真实验室</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 顶部导航 -->
+        <header>
+            <h1>⚡ 电磁学仿真实验室</h1>
+            <nav class="tabs">
+                <button class="tab-btn active" data-tab="particle">粒子偏转仿真</button>
+                <button class="tab-btn" data-tab="capacitor">平行板电容器</button>
+                <button class="tab-btn" data-tab="solenoid">通电螺线管</button>
+            </nav>
+        </header>
+
+        <!-- 内容区域 -->
+        <main>
+            <!-- 模块1: 带电粒子在复合电磁场中的偏转 -->
+            <section id="particle" class="tab-content active">
+                <div class="control-panel">
+                    <h2>📐 参数控制</h2>
+                    
+                    <div class="control-group">
+                        <label>运动模式</label>
+                        <div class="mode-buttons">
+                            <button class="mode-btn active" data-mode="electric">纯电场偏转</button>
+                            <button class="mode-btn" data-mode="magnetic">纯磁场圆周</button>
+                            <button class="mode-btn" data-mode="compound">复合场/速度选择器</button>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label>电场强度 E (N/C)</label>
+                        <input type="range" id="eField" min="0" max="100" value="50">
+                        <span class="value-display" id="eFieldValue">50</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>磁感应强度 B (T)</label>
+                        <input type="range" id="bField" min="0" max="5" value="2" step="0.1">
+                        <span class="value-display" id="bFieldValue">2.0</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>粒子初速度 v (m/s)</label>
+                        <input type="range" id="velocity" min="10" max="100" value="50">
+                        <span class="value-display" id="velocityValue">50</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>粒子质量 m (×10⁻²⁷ kg)</label>
+                        <input type="range" id="mass" min="1" max="20" value="10">
+                        <span class="value-display" id="massValue">10</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>粒子电荷</label>
+                        <div class="radio-group">
+                            <label><input type="radio" name="charge" value="positive" checked> 正电荷 (+)</label>
+                            <label><input type="radio" name="charge" value="negative"> 负电荷 (-)</label>
+                        </div>
+                    </div>
+
+                    <div class="button-group">
+                        <button id="startBtn">▶ 开始</button>
+                        <button id="pauseBtn">⏸ 暂停</button>
+                        <button id="resetBtn">🔄 重置</button>
+                        <button id="clearBtn">🗑 清除轨迹</button>
+                    </div>
+
+                    <div class="info-box">
+                        <h3>📊 实时数据</h3>
+                        <p>位置: <span id="positionDisplay">(0, 0)</span></p>
+                        <p>速度: <span id="speedDisplay">0</span> m/s</p>
+                        <p>加速度: <span id="accelDisplay">0</span> m/s²</p>
+                    </div>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="particleCanvas"></canvas>
+                    <div class="canvas-overlay">
+                        <span id="modeLabel">纯电场偏转模式</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 模块2: 平行板电容器动态变化仿真 -->
+            <section id="capacitor" class="tab-content">
+                <div class="control-panel">
+                    <h2>📐 参数控制</h2>
+                    
+                    <div class="control-group">
+                        <label>工作模式</label>
+                        <div class="mode-buttons">
+                            <button class="mode-btn active" data-cap-mode="voltage">接电源 (U不变)</button>
+                            <button class="mode-btn" data-cap-mode="charge">断电源 (Q不变)</button>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label>极板间距 d (mm)</label>
+                        <input type="range" id="distance" min="1" max="50" value="10">
+                        <span class="value-display" id="distanceValue">10</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>极板面积 S (cm²)</label>
+                        <input type="range" id="area" min="10" max="200" value="100">
+                        <span class="value-display" id="areaValue">100</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>相对介电常数 ε<sub>r</sub></label>
+                        <input type="range" id="dielectric" min="1" max="10" value="1" step="0.5">
+                        <span class="value-display" id="dielectricValue">1.0</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>电源电压 U (V)</label>
+                        <input type="range" id="voltage" min="1" max="100" value="12">
+                        <span class="value-display" id="voltageValue">12</span>
+                    </div>
+
+                    <div class="button-group">
+                        <button id="capResetBtn">🔄 重置参数</button>
+                    </div>
+
+                    <div class="info-box">
+                        <h3>📊 计算结果</h3>
+                        <div class="result-item">
+                            <span>电容 C:</span>
+                            <span class="result-value" id="capacitance">0.00</span>
+                            <span class="unit">nF</span>
+                        </div>
+                        <div class="result-item">
+                            <span>电压 U:</span>
+                            <span class="result-value" id="capVoltage">0.00</span>
+                            <span class="unit">V</span>
+                        </div>
+                        <div class="result-item">
+                            <span>电荷量 Q:</span>
+                            <span class="result-value" id="chargeQ">0.00</span>
+                            <span class="unit">nC</span>
+                        </div>
+                        <div class="result-item">
+                            <span>场强 E:</span>
+                            <span class="result-value" id="fieldE">0.00</span>
+                            <span class="unit">kV/m</span>
+                        </div>
+                        <div class="trend-indicator" id="trendBox">
+                            <span id="trendIcon">→</span>
+                            <span id="trendText">参数稳定</span>
+                        </div>
+                    </div>
+
+                    <div class="formula-box">
+                        <h4>📝 核心公式</h4>
+                        <p>C = ε₀ε<sub>r</sub>S/d</p>
+                        <p>Q = C·U</p>
+                        <p>E = U/d</p>
+                    </div>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="capacitorCanvas"></canvas>
+                </div>
+            </section>
+
+            <!-- 模块3: 通电螺线管空间磁感线可视化 -->
+            <section id="solenoid" class="tab-content">
+                <div class="control-panel">
+                    <h2>📐 参数控制</h2>
+                    
+                    <div class="control-group">
+                        <label>螺线管匝数 N</label>
+                        <input type="range" id="turns" min="10" max="500" value="100">
+                        <span class="value-display" id="turnsValue">100</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>电流大小 I (A)</label>
+                        <input type="range" id="current" min="0.1" max="10" value="2" step="0.1">
+                        <span class="value-display" id="currentValue">2.0</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>螺线管长度 L (cm)</label>
+                        <input type="range" id="length" min="5" max="50" value="20">
+                        <span class="value-display" id="lengthValue">20</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>螺线管半径 R (cm)</label>
+                        <input type="range" id="radius" min="1" max="10" value="3">
+                        <span class="value-display" id="radiusValue">3</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>磁感线条数</label>
+                        <input type="range" id="lineCount" min="5" max="30" value="15">
+                        <span class="value-display" id="lineCountValue">15</span>
+                    </div>
+
+                    <div class="control-group">
+                        <label>数值精度</label>
+                        <div class="radio-group">
+                            <label><input type="radio" name="precision" value="low"> 低 (快速)</label>
+                            <label><input type="radio" name="precision" value="medium" checked> 中 (平衡)</label>
+                            <label><input type="radio" name="precision" value="high"> 高 (精确)</label>
+                        </div>
+                    </div>
+
+                    <div class="button-group">
+                        <button id="solResetBtn">🔄 重置参数</button>
+                        <button id="animateBtn">▶ 磁场动画</button>
+                    </div>
+
+                    <div class="info-box">
+                        <h3>📊 磁场数据</h3>
+                        <div class="result-item">
+                            <span>轴线中心 B:</span>
+                            <span class="result-value" id="centerB">0.00</span>
+                            <span class="unit">mT</span>
+                        </div>
+                        <div class="result-item">
+                            <span>轴线端点 B:</span>
+                            <span class="result-value" id="endB">0.00</span>
+                            <span class="unit">mT</span>
+                        </div>
+                        <div class="result-item">
+                            <span>匝数密度 n:</span>
+                            <span class="result-value" id="turnDensity">0</span>
+                            <span class="unit">匝/m</span>
+                        </div>
+                        <div class="mouse-position">
+                            <p>鼠标位置 B: <span id="mouseB">--</span> mT</p>
+                            <p>坐标: <span id="mousePos">--</span></p>
+                        </div>
+                    </div>
+
+                    <div class="formula-box">
+                        <h4>📝 核心公式</h4>
+                        <p>中心: B = μ₀nI</p>
+                        <p>端点: B = ½μ₀nI</p>
+                        <p>μ₀ = 4π×10⁻⁷ T·m/A</p>
+                    </div>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="solenoidCanvas"></canvas>
+                    <div class="canvas-overlay">
+                        <span id="solOverlay">移动鼠标查看磁场强度</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="particle_deflection.js"></script>
+    <script src="capacitor_simulation.js"></script>
+    <script src="solenoid_visualization.js"></script>
+    <script>
+        // 标签页切换
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.tab).classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>
