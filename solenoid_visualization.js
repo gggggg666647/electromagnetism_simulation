@@ -1,610 +1,470 @@
-/**
- * 模块3: 通电螺线管空间磁感线可视化
- * 功能: Canvas2D绘制截面磁感线分布图，鼠标悬停显示磁感应强度
- * 作者: AI辅助编程
- */
-
 class SolenoidVisualization {
     constructor() {
         this.canvas = document.getElementById('solenoidCanvas');
         this.ctx = this.canvas.getContext('2d');
-        
-        // 物理常数
-        this.mu0 = 4 * Math.PI * 1e-7; // 真空磁导率
-        
-        // 物理参数
-        this.params = {
-            N: 100,         // 匝数
-            I: 2,           // 电流 A
-            L: 20,          // 长度 cm
-            R: 3,           // 半径 cm
-            lineCount: 15,  // 磁感线条数
-            precision: 'medium' // low, medium, high
-        };
-        
-        // 动画状态
+        this.mu0 = 4 * Math.PI * 1e-7;
+        this.params = { N: 100, I: 2, L: 20, R: 3, lineCount: 15, precision: 'medium', showVectors: true };
+        this.camera = { yaw: -0.55, pitch: -0.28, zoom: 1 };
+        this.mousePos = null;
+        this.dragState = null;
         this.isAnimating = false;
         this.animationFrame = 0;
-        this.mousePos = null;
-        
-        this.init();
-    }
-    
-    init() {
+
         this.resizeCanvas();
         this.setupControls();
         this.setupMouse();
-        this.calculateValues();
-        this.draw();
-        window.addEventListener('resize', () => {
-            this.resizeCanvas();
-            this.draw();
-        });
+        this.calculate();
+        window.addEventListener('resize', () => this.resizeCanvas());
     }
-    
+
     resizeCanvas() {
         const container = this.canvas.parentElement;
+        if (!container.clientWidth) return;
         this.canvas.width = container.clientWidth;
         this.canvas.height = container.clientHeight || 700;
+        this.draw();
     }
-    
+
     setupControls() {
-        // 匝数
-        const turns = document.getElementById('turns');
-        const turnsValue = document.getElementById('turnsValue');
-        turns.addEventListener('input', () => {
-            this.params.N = parseInt(turns.value);
-            turnsValue.textContent = this.params.N;
-            this.updateCalculation();
-        });
-        
-        // 电流
-        const current = document.getElementById('current');
-        const currentValue = document.getElementById('currentValue');
-        current.addEventListener('input', () => {
-            this.params.I = parseFloat(current.value);
-            currentValue.textContent = this.params.I.toFixed(1);
-            this.updateCalculation();
-        });
-        
-        // 长度
-        const length = document.getElementById('length');
-        const lengthValue = document.getElementById('lengthValue');
-        length.addEventListener('input', () => {
-            this.params.L = parseFloat(length.value);
-            lengthValue.textContent = this.params.L;
-            this.updateCalculation();
-        });
-        
-        // 半径
-        const radius = document.getElementById('radius');
-        const radiusValue = document.getElementById('radiusValue');
-        radius.addEventListener('input', () => {
-            this.params.R = parseFloat(radius.value);
-            radiusValue.textContent = this.params.R;
-            this.updateCalculation();
-        });
-        
-        // 磁感线条数
-        const lineCount = document.getElementById('lineCount');
-        const lineCountValue = document.getElementById('lineCountValue');
-        lineCount.addEventListener('input', () => {
-            this.params.lineCount = parseInt(lineCount.value);
-            lineCountValue.textContent = this.params.lineCount;
-            this.draw();
-        });
-        
-        // 精度选择
-        document.querySelectorAll('input[name="precision"]').forEach(radio => {
+        this.bindRange('turns', 'turnsValue', 'N', parseInt);
+        this.bindRange('current', 'currentValue', 'I', parseFloat, 1);
+        this.bindRange('length', 'lengthValue', 'L', parseFloat);
+        this.bindRange('radius', 'radiusValue', 'R', parseFloat);
+        this.bindRange('lineCount', 'lineCountValue', 'lineCount', parseInt);
+
+        document.querySelectorAll('input[name="precision"]').forEach((radio) => {
             radio.addEventListener('change', () => {
                 this.params.precision = radio.value;
                 this.draw();
             });
         });
-        
-        // 按钮
+
+        document.getElementById('showVectorField').addEventListener('change', (event) => {
+            this.params.showVectors = event.target.checked;
+            this.draw();
+        });
+
         document.getElementById('solResetBtn').addEventListener('click', () => this.reset());
         document.getElementById('animateBtn').addEventListener('click', () => this.toggleAnimation());
     }
-    
-    setupMouse() {
-        this.canvas.addEventListener('mousemove', (e) => {
-            const rect = this.canvas.getBoundingClientRect();
-            this.mousePos = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
-            this.updateMouseB();
+
+    bindRange(inputId, outputId, param, parser, digits = null) {
+        const input = document.getElementById(inputId);
+        const output = document.getElementById(outputId);
+        input.addEventListener('input', () => {
+            this.params[param] = parser(input.value);
+            output.textContent = digits === null ? this.params[param] : this.params[param].toFixed(digits);
+            this.calculate();
             this.draw();
         });
-        
-        this.canvas.addEventListener('mouseleave', () => {
+    }
+
+    setupMouse() {
+        this.canvas.addEventListener('pointerdown', (event) => {
+            this.dragState = {
+                x: event.clientX,
+                y: event.clientY,
+                yaw: this.camera.yaw,
+                pitch: this.camera.pitch
+            };
+            this.canvas.setPointerCapture(event.pointerId);
+            this.canvas.style.cursor = 'grabbing';
+        });
+
+        this.canvas.addEventListener('pointermove', (event) => {
+            const rect = this.canvas.getBoundingClientRect();
+            this.mousePos = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+            if (this.dragState) {
+                this.camera.yaw = this.dragState.yaw + (event.clientX - this.dragState.x) * 0.008;
+                this.camera.pitch = this.clamp(
+                    this.dragState.pitch + (event.clientY - this.dragState.y) * 0.008,
+                    -1.1,
+                    1.1
+                );
+            }
+            this.updateMouseInfo();
+            this.draw();
+        });
+
+        this.canvas.addEventListener('pointerup', (event) => {
+            this.dragState = null;
+            this.canvas.releasePointerCapture(event.pointerId);
+            this.canvas.style.cursor = 'grab';
+        });
+
+        this.canvas.addEventListener('pointerleave', () => {
+            if (this.dragState) return;
             this.mousePos = null;
             document.getElementById('mouseB').textContent = '--';
             document.getElementById('mousePos').textContent = '--';
             this.draw();
         });
+
+        this.canvas.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            this.camera.zoom = this.clamp(this.camera.zoom - event.deltaY * 0.001, 0.65, 1.7);
+            this.draw();
+        }, { passive: false });
     }
-    
+
     reset() {
-        document.getElementById('turns').value = 100;
-        document.getElementById('turnsValue').textContent = '100';
-        document.getElementById('current').value = 2;
-        document.getElementById('currentValue').textContent = '2.0';
-        document.getElementById('length').value = 20;
-        document.getElementById('lengthValue').textContent = '20';
-        document.getElementById('radius').value = 3;
-        document.getElementById('radiusValue').textContent = '3';
-        document.getElementById('lineCount').value = 15;
-        document.getElementById('lineCountValue').textContent = '15';
-        
-        this.params.N = 100;
-        this.params.I = 2;
-        this.params.L = 20;
-        this.params.R = 3;
-        this.params.lineCount = 15;
-        
-        this.calculateValues();
+        this.params = { N: 100, I: 2, L: 20, R: 3, lineCount: 15, precision: 'medium', showVectors: true };
+        this.camera = { yaw: -0.55, pitch: -0.28, zoom: 1 };
+        const values = {
+            turns: '100',
+            turnsValue: '100',
+            current: '2',
+            currentValue: '2.0',
+            length: '20',
+            lengthValue: '20',
+            radius: '3',
+            radiusValue: '3',
+            lineCount: '15',
+            lineCountValue: '15'
+        };
+        Object.entries(values).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if ('value' in element) element.value = value;
+            else element.textContent = value;
+        });
+        document.querySelector('input[name="precision"][value="medium"]').checked = true;
+        document.getElementById('showVectorField').checked = true;
+        this.calculate();
         this.draw();
     }
-    
+
     toggleAnimation() {
         this.isAnimating = !this.isAnimating;
-        const btn = document.getElementById('animateBtn');
-        btn.textContent = this.isAnimating ? '⏸ 停止动画' : '▶ 磁场动画';
-        
-        if (this.isAnimating) {
-            this.animate();
-        }
+        document.getElementById('animateBtn').textContent = this.isAnimating ? '停止动画' : '磁场动画';
+        if (this.isAnimating) this.animate();
     }
-    
-    updateCalculation() {
-        this.calculateValues();
-        this.draw();
+
+    calculate() {
+        const density = this.params.N / (this.params.L * 0.01);
+        this.centerB = this.mu0 * density * this.params.I;
+        document.getElementById('centerB').textContent = (this.centerB * 1000).toFixed(2);
+        document.getElementById('endB').textContent = (this.centerB * 500).toFixed(2);
+        document.getElementById('turnDensity').textContent = Math.round(density);
     }
-    
-    calculateValues() {
-        // 单位转换
-        const L = this.params.L * 0.01;  // cm -> m
-        const n = this.params.N / L;      // 匝数密度
-        
-        // 轴线中心处磁场 B = μ0nI
-        const centerB = this.mu0 * n * this.params.I;
-        
-        // 轴线端点处磁场 B = ½μ0nI (近似)
-        const endB = centerB * 0.5;
-        
-        document.getElementById('centerB').textContent = (centerB * 1000).toFixed(2); // T -> mT
-        document.getElementById('endB').textContent = (endB * 1000).toFixed(2);
-        document.getElementById('turnDensity').textContent = Math.round(n);
+
+    clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
     }
-    
-    updateMouseB() {
-        if (!this.mousePos) return;
-        
-        const { x, y } = this.mousePos;
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-        
-        // 转换为物理坐标 (cm)
-        const scale = Math.min(this.canvas.width, this.canvas.height) / (this.params.L * 3);
-        const px = (x - centerX) / scale;
-        const py = (y - centerY) / scale;
-        
-        // 计算该点的磁感应强度 (简化模型)
-        const B = this.calculateBAtPoint(px, py);
-        
-        document.getElementById('mouseB').textContent = (B * 1000).toFixed(3);
-        document.getElementById('mousePos').textContent = `(${px.toFixed(1)}, ${py.toFixed(1)}) cm`;
+
+    getScale() {
+        const base = Math.min(this.canvas.width || 700, this.canvas.height || 700);
+        return base / (this.params.L * 2.4) * this.camera.zoom;
     }
-    
-    calculateBAtPoint(px, py) {
-        // 使用毕奥-萨伐尔定律简化计算
-        // 相对于螺线管的坐标: x轴沿螺线管轴线, y轴垂直轴线
-        const L = this.params.L;
-        const R = this.params.R;
-        
-        // 转换到螺线管局部坐标系
-        const x = px;  // 沿轴线方向
-        const r = Math.abs(py);  // 到轴线的垂直距离
-        
-        // 匝数密度
-        const n = this.params.N / (L * 0.01); // 匝/m
-        
-        // 判断点是否在螺线管内部
-        const halfL = L / 2;
-        
-        if (Math.abs(x) <= halfL && r <= R) {
-            // 内部: B ≈ μ0nI
-            return this.mu0 * n * this.params.I;
-        } else {
-            // 外部: B随距离衰减
-            const distToAxis = Math.max(0, r - R);
-            const distToEnd = Math.max(0, Math.abs(x) - halfL);
-            const decay = 1 / (1 + (distToAxis + distToEnd) * 0.5);
-            return this.mu0 * n * this.params.I * Math.max(0.01, decay);
-        }
-    }
-    
-    draw() {
-        // 清空画布
-        this.ctx.fillStyle = '#0a0a15';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // 绘制背景网格
-        this.drawGrid();
-        
-        // 绘制坐标轴线
-        this.drawAxes();
-        
-        // 绘制螺线管
-        this.drawSolenoid();
-        
-        // 绘制磁感线
-        this.drawMagneticFieldLines();
-        
-        // 绘制鼠标指示器
-        this.drawMouseIndicator();
-        
-        // 绘制磁场强度热图
-        this.drawHeatMap();
-    }
-    
-    drawGrid() {
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-        this.ctx.lineWidth = 1;
-        
-        const gridSize = 40;
-        
-        for (let x = 0; x < this.canvas.width; x += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(x, 0);
-            this.ctx.lineTo(x, this.canvas.height);
-            this.ctx.stroke();
-        }
-        
-        for (let y = 0; y < this.canvas.height; y += gridSize) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, y);
-            this.ctx.lineTo(this.canvas.width, y);
-            this.ctx.stroke();
-        }
-    }
-    
-    drawAxes() {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-        
-        // 主轴线（x轴）
-        this.ctx.strokeStyle = 'rgba(0, 217, 255, 0.3)';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([5, 5]);
-        this.ctx.beginPath();
-        this.ctx.moveTo(0, centerY);
-        this.ctx.lineTo(this.canvas.width, centerY);
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-        
-        // 标注
-        this.ctx.fillStyle = 'rgba(0, 217, 255, 0.5)';
-        this.ctx.font = '12px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.fillText('轴线 (x)', this.canvas.width - 50, centerY - 10);
-    }
-    
-    drawSolenoid() {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-        
-        // 绘制尺寸缩放
-        const scale = Math.min(this.canvas.width, this.canvas.height) / (this.params.L * 3);
-        const L_px = this.params.L * scale;
-        const R_px = this.params.R * scale;
-        
-        const left = centerX - L_px / 2;
-        const right = centerX + L_px / 2;
-        const top = centerY - R_px;
-        const bottom = centerY + R_px;
-        
-        // 绘制螺线管线圈
-        this.ctx.strokeStyle = '#4488ff';
-        this.ctx.lineWidth = 3;
-        
-        const turnsToDraw = Math.min(this.params.N / 5, 30);
-        const turnSpacing = L_px / turnsToDraw;
-        
-        // 上边缘线圈
-        this.ctx.beginPath();
-        for (let i = 0; i <= turnsToDraw; i++) {
-            const x = left + i * turnSpacing;
-            if (i === 0) {
-                this.ctx.moveTo(x, top);
-            } else {
-                this.ctx.lineTo(x, top);
-            }
-            
-            // 绘制绕线效果
-            if (i < turnsToDraw) {
-                const midX = x + turnSpacing / 2;
-                this.ctx.quadraticCurveTo(midX, top - 8, x + turnSpacing, top);
-            }
-        }
-        this.ctx.stroke();
-        
-        // 下边缘线圈
-        this.ctx.beginPath();
-        for (let i = 0; i <= turnsToDraw; i++) {
-            const x = left + i * turnSpacing;
-            if (i === 0) {
-                this.ctx.moveTo(x, bottom);
-            } else {
-                this.ctx.lineTo(x, bottom);
-            }
-            
-            // 绘制绕线效果
-            if (i < turnsToDraw) {
-                const midX = x + turnSpacing / 2;
-                this.ctx.quadraticCurveTo(midX, bottom + 8, x + turnSpacing, bottom);
-            }
-        }
-        this.ctx.stroke();
-        
-        // 绘制端盖（垂直部分）
-        this.ctx.fillStyle = 'rgba(68, 136, 255, 0.3)';
-        this.ctx.fillRect(left - 5, top, 10, R_px * 2);
-        this.ctx.fillRect(right - 5, top, 10, R_px * 2);
-        
-        // 绘制电流方向（点和叉）
-        const currentMarkSpacing = L_px / 8;
-        this.ctx.font = 'bold 12px Arial';
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        
-        for (let x = left + currentMarkSpacing; x < right; x += currentMarkSpacing * 2) {
-            // 上边缘: 电流向外 (·)
-            this.ctx.fillStyle = '#00ff88';
-            this.ctx.fillText('·', x, top - 15);
-            
-            // 下边缘: 电流向里 (×)
-            this.ctx.fillStyle = '#ff4444';
-            this.ctx.fillText('×', x, bottom + 15);
-        }
-        
-        // 标注尺寸
-        this.ctx.fillStyle = '#00d9ff';
-        this.ctx.font = '14px Arial';
-        this.ctx.fillText(`L = ${this.params.L} cm`, centerX, top - 35);
-        this.ctx.fillText(`R = ${this.params.R} cm`, right + 40, centerY);
-        
-        // 标注N极S极
-        this.ctx.font = 'bold 24px Arial';
-        this.ctx.fillStyle = '#ff4444';
-        this.ctx.fillText('N', left - 30, centerY);
-        this.ctx.fillStyle = '#4488ff';
-        this.ctx.fillText('S', right + 30, centerY);
-        
-        // 保存绘制参数
-        this.drawingParams = {
-            centerX,
-            centerY,
-            scale,
-            L_px,
-            R_px,
-            left,
-            right,
-            top,
-            bottom
+
+    project(point) {
+        const cosYaw = Math.cos(this.camera.yaw);
+        const sinYaw = Math.sin(this.camera.yaw);
+        const cosPitch = Math.cos(this.camera.pitch);
+        const sinPitch = Math.sin(this.camera.pitch);
+        const x = point.x * cosYaw - point.z * sinYaw;
+        const depth = point.x * sinYaw + point.z * cosYaw;
+        const y = point.y * cosPitch - depth * sinPitch;
+        const z = point.y * sinPitch + depth * cosPitch;
+        const scale = this.getScale();
+        return {
+            x: this.canvas.width / 2 + x * scale,
+            y: this.canvas.height / 2 - y * scale,
+            depth: z
         };
     }
-    
-    drawMagneticFieldLines() {
-        if (!this.drawingParams) return;
-        
-        const { centerX, centerY, scale, L_px, R_px, left, right } = this.drawingParams;
-        
-        // 精度参数
-        const steps = this.params.precision === 'low' ? 50 : 
-                      this.params.precision === 'medium' ? 100 : 200;
-        
-        const L_cm = this.params.L;
-        const R_cm = this.params.R;
-        
-        // 起始点分布（螺线管端面附近）
-        const startPoints = [];
-        const nLines = this.params.lineCount;
-        
-        for (let i = 0; i < nLines; i++) {
-            const ratio = (i + 0.5) / nLines;
-            const r = R_cm * ratio * 0.9; // 从轴线到半径分布
-            startPoints.push({ x: -L_cm / 2, y: r });
-            if (r > 0.1) {
-                startPoints.push({ x: -L_cm / 2, y: -r });
-            }
+
+    screenToCenterPlane(screenX, screenY) {
+        const scale = this.getScale();
+        const sx = (screenX - this.canvas.width / 2) / scale;
+        const sy = -(screenY - this.canvas.height / 2) / scale;
+        const cosYaw = Math.cos(this.camera.yaw);
+        const sinYaw = Math.sin(this.camera.yaw);
+        const cosPitch = Math.cos(this.camera.pitch);
+        const sinPitch = Math.sin(this.camera.pitch);
+        const x = sx / cosYaw;
+        const y = (sy + x * sinYaw * sinPitch) / cosPitch;
+        return { x, y, z: 0 };
+    }
+
+    getFieldVector(x, radialDistance) {
+        const halfL = this.params.L / 2;
+        if (Math.abs(x) <= halfL && radialDistance <= this.params.R) {
+            return { axial: this.centerB, radial: 0 };
         }
-        
-        // 动画相位
-        const phase = this.isAnimating ? Math.sin(this.animationFrame * 0.05) : 0;
-        
-        // 绘制每条磁感线
-        startPoints.forEach((point, idx) => {
-            const points = this.calculateFieldLine(point.x, point.y, steps);
-            
-            if (points.length < 2) return;
-            
-            // 转换为画布坐标
-            const canvasPoints = points.map(p => ({
-                x: centerX + p.x * scale,
-                y: centerY + p.y * scale
-            }));
-            
-            // 绘制线条
-            const intensity = Math.sin((idx / startPoints.length + phase) * Math.PI) * 0.3 + 0.7;
-            this.ctx.strokeStyle = `rgba(255, 150, 50, ${intensity * 0.8})`;
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            this.ctx.moveTo(canvasPoints[0].x, canvasPoints[0].y);
-            
-            for (let i = 1; i < canvasPoints.length; i++) {
-                this.ctx.lineTo(canvasPoints[i].x, canvasPoints[i].y);
-            }
-            this.ctx.stroke();
-            
-            // 绘制方向箭头（间隔放置）
-            const arrowStep = Math.floor(canvasPoints.length / 5);
-            for (let i = arrowStep; i < canvasPoints.length - 5; i += arrowStep) {
-                if (i + 1 < canvasPoints.length) {
-                    this.drawArrow(
-                        canvasPoints[i].x, canvasPoints[i].y,
-                        canvasPoints[i + 1].x, canvasPoints[i + 1].y
-                    );
+
+        const distance = Math.max(Math.hypot(x, radialDistance), this.params.R * 0.8, 0.5);
+        const strength = this.centerB * Math.pow(this.params.R / distance, 3);
+        return {
+            axial: strength * (3 * x * x / (distance * distance) - 1),
+            radial: strength * (3 * x * radialDistance / (distance * distance))
+        };
+    }
+
+    getFieldVector3D(point) {
+        const radialDistance = Math.hypot(point.y, point.z);
+        const field = this.getFieldVector(point.x, radialDistance);
+        if (radialDistance < 1e-6) {
+            return { x: field.axial, y: 0, z: 0 };
+        }
+        return {
+            x: field.axial,
+            y: field.radial * point.y / radialDistance,
+            z: field.radial * point.z / radialDistance
+        };
+    }
+
+    updateMouseInfo() {
+        if (!this.mousePos) return;
+        const point = this.screenToCenterPlane(this.mousePos.x, this.mousePos.y);
+        const field = this.getFieldVector(point.x, Math.abs(point.y));
+        document.getElementById('mouseB').textContent = (Math.hypot(field.axial, field.radial) * 1000).toFixed(3);
+        document.getElementById('mousePos').textContent = `(${point.x.toFixed(1)}, ${point.y.toFixed(1)}, 0.0) cm`;
+    }
+
+    draw() {
+        this.ctx.fillStyle = '#070b19';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        if (!this.canvas.width) return;
+        this.drawBackdrop();
+        if (this.params.showVectors) this.drawVectorField();
+        this.drawCylinder();
+        this.drawHelix();
+        this.drawLabels();
+        this.drawMouseIndicator();
+    }
+
+    drawBackdrop() {
+        const gradient = this.ctx.createRadialGradient(
+            this.canvas.width / 2,
+            this.canvas.height / 2,
+            0,
+            this.canvas.width / 2,
+            this.canvas.height / 2,
+            this.canvas.width * 0.65
+        );
+        gradient.addColorStop(0, 'rgba(18, 45, 85, 0.5)');
+        gradient.addColorStop(1, 'rgba(3, 7, 18, 0)');
+        this.ctx.fillStyle = gradient;
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        const floorY = -this.params.R * 2.5;
+        const extent = this.params.L * 1.25;
+        this.ctx.lineWidth = 1;
+        for (let x = -extent; x <= extent; x += this.params.L / 10) {
+            this.drawPolyline([
+                { x, y: floorY, z: -extent },
+                { x, y: floorY, z: extent }
+            ], 'rgba(80, 150, 255, 0.12)');
+        }
+        for (let z = -extent; z <= extent; z += this.params.L / 10) {
+            this.drawPolyline([
+                { x: -extent, y: floorY, z },
+                { x: extent, y: floorY, z }
+            ], 'rgba(80, 150, 255, 0.12)');
+        }
+    }
+
+    drawVectorField() {
+        const qualityOffset = this.params.precision === 'high' ? 1 : this.params.precision === 'low' ? -1 : 0;
+        const scale = this.getScale();
+        const near = {
+            x: this.params.L * 0.72,
+            y: this.params.R * 2.2,
+            z: this.params.R * 2.2
+        };
+        const middle = {
+            x: Math.max(this.params.L * 1.12, this.canvas.width / scale * 0.34),
+            y: Math.max(this.params.R * 4.4, this.canvas.height / scale * 0.3),
+            z: Math.max(this.params.R * 4.8, this.canvas.height / scale * 0.36)
+        };
+        const far = {
+            x: Math.max(this.params.L * 1.7, this.canvas.width / scale * 0.48),
+            y: Math.max(this.params.L, this.canvas.height / scale * 0.48),
+            z: Math.max(this.params.L, this.canvas.height / scale * 0.55)
+        };
+        const vectors = [];
+
+        const addLayer = (extent, counts, innerExtent = null) => {
+            for (let xi = 0; xi < counts.x; xi++) {
+                const x = -extent.x + xi * extent.x * 2 / (counts.x - 1);
+                for (let yi = 0; yi < counts.y; yi++) {
+                    const y = -extent.y + yi * extent.y * 2 / (counts.y - 1);
+                    for (let zi = 0; zi < counts.z; zi++) {
+                        const z = -extent.z + zi * extent.z * 2 / (counts.z - 1);
+                        if (innerExtent &&
+                            Math.abs(x) <= innerExtent.x &&
+                            Math.abs(y) <= innerExtent.y &&
+                            Math.abs(z) <= innerExtent.z) {
+                            continue;
+                        }
+                        const point = { x, y, z };
+                        const field = this.getFieldVector3D(point);
+                        const magnitude = Math.hypot(field.x, field.y, field.z);
+                        if (magnitude < Number.EPSILON) continue;
+                        vectors.push({ point, field, magnitude, depth: this.project(point).depth });
+                    }
                 }
             }
-        });
-    }
-    
-    calculateFieldLine(startX, startY, steps) {
-        const points = [{ x: startX, y: startY }];
-        let x = startX;
-        let y = startY;
-        
-        const dt = 0.5; // 步长
-        const L_cm = this.params.L;
-        const R_cm = this.params.R;
-        const halfL = L_cm / 2;
-        
-        for (let i = 0; i < steps; i++) {
-            // 计算磁场方向
-            const B = this.getFieldDirection(x, y, halfL, R_cm);
-            const Bmag = Math.sqrt(B.x * B.x + B.y * B.y);
-            
-            if (Bmag < 0.001) break;
-            
-            // 归一化并前进
-            const dx = (B.x / Bmag) * dt;
-            const dy = (B.y / Bmag) * dt;
-            
-            x += dx;
-            y += dy;
-            
-            // 边界检查
-            if (Math.abs(y) > R_cm * 5 || Math.abs(x) > halfL * 5) break;
-            
-            points.push({ x, y });
-        }
-        
-        return points;
-    }
-    
-    getFieldDirection(x, y, halfL, R_cm) {
-        // 简化的磁场方向计算
-        // x: 沿轴线方向, y: 垂直轴线方向
-        
-        const r = Math.sqrt(x * x + y * y);
-        
-        if (r < 0.01) return { x: 1, y: 0 };
-        
-        // 磁偶极子场近似
-        // Bx = (3x² - r²) / r^5
-        // By = 3xy / r^5
-        
-        // 偏移偶极子位置到螺线管中心
-        const Bx1 = (3 * x * x - r * r) / Math.pow(r + 0.1, 5);
-        const By1 = 3 * x * y / Math.pow(r + 0.1, 5);
-        
-        // 在螺线管内部，磁场主要沿x轴
-        const insideFactor = Math.abs(x) < halfL && Math.abs(y) < R_cm ? 10 : 1;
-        
-        return {
-            x: Bx1 * insideFactor + 0.1,
-            y: By1
         };
+
+        addLayer(near, {
+            x: this.clamp(Math.round(this.params.lineCount * 0.24) + 5 + qualityOffset, 6, 11),
+            y: this.clamp(Math.round(this.params.lineCount * 0.12) + 3 + qualityOffset, 4, 6),
+            z: this.clamp(Math.round(this.params.lineCount * 0.1) + 3 + qualityOffset, 4, 6)
+        });
+        addLayer(middle, {
+            x: this.clamp(Math.round(this.params.lineCount * 0.14) + 4 + qualityOffset, 5, 8),
+            y: this.clamp(Math.round(this.params.lineCount * 0.08) + 3 + qualityOffset, 3, 5),
+            z: this.clamp(Math.round(this.params.lineCount * 0.06) + 3 + qualityOffset, 3, 5)
+        }, near);
+        addLayer(far, {
+            x: this.clamp(Math.round(this.params.lineCount * 0.08) + 3 + qualityOffset, 4, 6),
+            y: this.clamp(Math.round(this.params.lineCount * 0.05) + 3 + qualityOffset, 3, 4),
+            z: this.clamp(Math.round(this.params.lineCount * 0.04) + 2 + qualityOffset, 3, 4)
+        }, middle);
+
+        this.lastVectorCount = vectors.length;
+        vectors.sort((a, b) => a.depth - b.depth).forEach((vector) => this.drawVectorArrow(vector));
     }
-    
-    drawArrow(x1, y1, x2, y2) {
+
+    drawVectorArrow(vector) {
+        const { point, field, magnitude } = vector;
+        const relativeStrength = magnitude / this.centerB;
+        const strength = this.clamp(Math.pow(relativeStrength, 0.24), 0.1, 1);
+        const length = this.params.L * (0.018 + strength * 0.11);
+        const endpoint = {
+            x: point.x + field.x / magnitude * length,
+            y: point.y + field.y / magnitude * length,
+            z: point.z + field.z / magnitude * length
+        };
+        const start = this.project(point);
+        const end = this.project(endpoint);
+        const hue = 195 - strength * 150;
+        const baseAlpha = 0.18 + strength * 0.68;
+        const pulse = this.isAnimating ? baseAlpha + Math.sin(this.animationFrame * 0.08 + point.x) * 0.1 : baseAlpha;
+        this.drawScreenArrow(start.x, start.y, end.x, end.y, `hsla(${hue}, 95%, 65%, ${pulse})`, 0.65 + strength * 1.25);
+    }
+
+    drawCylinder() {
+        const halfL = this.params.L / 2;
+        const topA = this.project({ x: -halfL, y: this.params.R, z: 0 });
+        const topB = this.project({ x: halfL, y: this.params.R, z: 0 });
+        const bottomB = this.project({ x: halfL, y: -this.params.R, z: 0 });
+        const bottomA = this.project({ x: -halfL, y: -this.params.R, z: 0 });
+        const shell = this.ctx.createLinearGradient(topA.x, topA.y, bottomB.x, bottomB.y);
+        shell.addColorStop(0, 'rgba(70, 130, 255, 0.05)');
+        shell.addColorStop(0.5, 'rgba(70, 170, 255, 0.16)');
+        shell.addColorStop(1, 'rgba(70, 130, 255, 0.04)');
+        this.ctx.fillStyle = shell;
+        this.ctx.beginPath();
+        this.ctx.moveTo(topA.x, topA.y);
+        this.ctx.lineTo(topB.x, topB.y);
+        this.ctx.lineTo(bottomB.x, bottomB.y);
+        this.ctx.lineTo(bottomA.x, bottomA.y);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.drawRing(-halfL, this.params.R, 'rgba(100, 190, 255, 0.65)', 1.5);
+        this.drawRing(halfL, this.params.R, 'rgba(100, 190, 255, 0.65)', 1.5);
+    }
+
+    drawHelix() {
+        const halfL = this.params.L / 2;
+        const turns = Math.min(38, Math.max(10, Math.round(this.params.N / 4)));
+        const segments = turns * 20;
+        let previous = null;
+        this.ctx.lineCap = 'round';
+        for (let index = 0; index <= segments; index++) {
+            const progress = index / segments;
+            const angle = progress * turns * Math.PI * 2;
+            const point = this.project({
+                x: -halfL + this.params.L * progress,
+                y: this.params.R * Math.cos(angle),
+                z: this.params.R * Math.sin(angle)
+            });
+            if (previous) {
+                const light = this.clamp(58 + point.depth / this.params.R * 12, 35, 78);
+                this.ctx.strokeStyle = `hsl(215, 95%, ${light}%)`;
+                this.ctx.lineWidth = point.depth > 0 ? 3.2 : 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(previous.x, previous.y);
+                this.ctx.lineTo(point.x, point.y);
+                this.ctx.stroke();
+            }
+            previous = point;
+        }
+        this.ctx.lineCap = 'butt';
+    }
+
+    drawLabels() {
+        const halfL = this.params.L / 2;
+        const north = this.project({ x: halfL + 1.5, y: 0, z: 0 });
+        const south = this.project({ x: -halfL - 1.5, y: 0, z: 0 });
+        this.ctx.font = 'bold 22px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillStyle = '#ff6666';
+        this.ctx.fillText('N', north.x, north.y);
+        this.ctx.fillStyle = '#77aaff';
+        this.ctx.fillText('S', south.x, south.y);
+        this.ctx.font = '14px Arial';
+        this.ctx.fillStyle = '#77ddff';
+        this.ctx.fillText(`N = ${this.params.N} 匝  |  I = ${this.params.I.toFixed(1)} A`, this.canvas.width / 2, 34);
+        this.ctx.fillStyle = 'rgba(180, 220, 255, 0.75)';
+        this.ctx.fillText('拖拽旋转视角  |  滚轮缩放', this.canvas.width / 2, this.canvas.height - 24);
+    }
+
+    drawMouseIndicator() {
+        if (!this.mousePos || this.dragState) return;
+        this.ctx.strokeStyle = 'rgba(0, 255, 136, 0.9)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        this.ctx.arc(this.mousePos.x, this.mousePos.y, 11, 0, Math.PI * 2);
+        this.ctx.stroke();
+    }
+
+    drawRing(x, radius, color, width) {
+        const points = [];
+        for (let index = 0; index <= 64; index++) {
+            const angle = index / 64 * Math.PI * 2;
+            points.push({ x, y: radius * Math.cos(angle), z: radius * Math.sin(angle) });
+        }
+        this.drawPolyline(points, color, width);
+    }
+
+    drawPolyline(points, color, width = 1) {
+        if (points.length < 2) return;
+        const projected = points.map((point) => this.project(point));
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = width;
+        this.ctx.beginPath();
+        this.ctx.moveTo(projected[0].x, projected[0].y);
+        projected.slice(1).forEach((point) => this.ctx.lineTo(point.x, point.y));
+        this.ctx.stroke();
+    }
+
+    drawScreenArrow(x1, y1, x2, y2, color, width = 2) {
         const angle = Math.atan2(y2 - y1, x2 - x1);
-        const arrowSize = 8;
-        
-        this.ctx.fillStyle = 'rgba(255, 150, 50, 0.9)';
+        const headSize = this.clamp(Math.hypot(x2 - x1, y2 - y1) * 0.36, 3, 8);
+        this.ctx.strokeStyle = color;
+        this.ctx.fillStyle = color;
+        this.ctx.lineWidth = width;
+        this.ctx.beginPath();
+        this.ctx.moveTo(x1, y1);
+        this.ctx.lineTo(x2, y2);
+        this.ctx.stroke();
         this.ctx.beginPath();
         this.ctx.moveTo(x2, y2);
-        this.ctx.lineTo(
-            x2 - arrowSize * Math.cos(angle - Math.PI / 6),
-            y2 - arrowSize * Math.sin(angle - Math.PI / 6)
-        );
-        this.ctx.lineTo(
-            x2 - arrowSize * Math.cos(angle + Math.PI / 6),
-            y2 - arrowSize * Math.sin(angle + Math.PI / 6)
-        );
+        this.ctx.lineTo(x2 - headSize * Math.cos(angle - Math.PI / 6), y2 - headSize * Math.sin(angle - Math.PI / 6));
+        this.ctx.lineTo(x2 - headSize * Math.cos(angle + Math.PI / 6), y2 - headSize * Math.sin(angle + Math.PI / 6));
         this.ctx.closePath();
         this.ctx.fill();
     }
-    
-    drawHeatMap() {
-        if (!this.drawingParams) return;
-        
-        const { centerX, centerY, scale, L_px, R_px } = this.drawingParams;
-        
-        // 绘制磁场强度指示器（圆形渐变）
-        const gradient = this.ctx.createRadialGradient(
-            centerX, centerY, 0,
-            centerX, centerY, Math.max(L_px, R_px) * 1.5
-        );
-        
-        gradient.addColorStop(0, 'rgba(255, 150, 50, 0.15)');
-        gradient.addColorStop(0.5, 'rgba(255, 150, 50, 0.05)');
-        gradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
-        
-        this.ctx.fillStyle = gradient;
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-    
-    drawMouseIndicator() {
-        if (!this.mousePos) return;
-        
-        const { x, y } = this.mousePos;
-        
-        // 绘制十字光标
-        this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-        this.ctx.lineWidth = 1;
-        this.ctx.setLineDash([3, 3]);
-        
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, 0);
-        this.ctx.lineTo(x, this.canvas.height);
-        this.ctx.moveTo(0, y);
-        this.ctx.lineTo(this.canvas.width, y);
-        this.ctx.stroke();
-        this.ctx.setLineDash([]);
-        
-        // 绘制指示器圆圈
-        this.ctx.strokeStyle = '#00ff88';
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.arc(x, y, 15, 0, Math.PI * 2);
-        this.ctx.stroke();
-        
-        // 显示数值
-        const B = this.calculateBAtPoint(
-            (x - this.drawingParams.centerX) / this.drawingParams.scale,
-            (y - this.drawingParams.centerY) / this.drawingParams.scale
-        );
-        
-        this.ctx.fillStyle = '#00ff88';
-        this.ctx.font = 'bold 14px Arial';
-        this.ctx.textAlign = 'left';
-        this.ctx.fillText(`${(B * 1000).toFixed(3)} mT`, x + 25, y - 5);
-    }
-    
+
     animate() {
         if (!this.isAnimating) return;
-        
         this.animationFrame++;
         this.draw();
         requestAnimationFrame(() => this.animate());
     }
 }
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    new SolenoidVisualization();
-});
+document.addEventListener('DOMContentLoaded', () => new SolenoidVisualization());
